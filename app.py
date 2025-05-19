@@ -3,6 +3,10 @@ import gradio as gr
 import requests
 import inspect
 import pandas as pd
+#---Custom Imports ---
+from smolagents import CodeAgent,load_tool,tool,TransformersModel, VisitWebpageTool, WebSearchTool
+import yaml
+import torch
 
 # (Keep Constants as is)
 # --- Constants ---
@@ -13,11 +17,39 @@ DEFAULT_API_URL = "https://agents-course-unit4-scoring.hf.space"
 class BasicAgent:
     def __init__(self):
         print("BasicAgent initialized.")
-    def __call__(self, question: str) -> str:
+
+        websearch_tool = WebSearchTool(max_results=3)
+        webpage_tool = VisitWebpageTool(max_output_length=40000)
+
+        with open("prompts.yaml", 'r') as stream:
+            prompt_templates = yaml.safe_load(stream)
+
+        self.model = LiteLLMModel(model_id="gemini/gemini-2.0-flash-lite", api_key=os.getenv('GEMINI_KEY'))
+
+        # self.model = TransformersModel(
+        #     model_id='google/gemma-3-4b-it',
+        #     device_map = "mps", # it is possible that this model may be overloaded
+        #     torch_dtype=torch.bfloat16
+        # )
+
+        self.tools = [websearch_tool, webpage_tool]
+
+        self.agent = CodeAgent(
+            name="Final_Assignment_Agent",
+            description="This is the Final Assignment agent.",
+            tools=self.tools,
+            model=self.model,
+            max_steps=3,
+            prompt_templates=prompt_templates
+        )
+    def __call__(self, question: str, task_id: str) -> str:
         print(f"Agent received question (first 50 chars): {question[:50]}...")
-        fixed_answer = "This is a default answer."
-        print(f"Agent returning fixed answer: {fixed_answer}")
-        return fixed_answer
+        load_file_prompt = """When you need to download a file that is associated with the task you can download the file at the following location: """
+        load_file_prompt += f"{DEFAULT_API_URL}/files/{task_id}"
+        question = load_file_prompt + "\n\n" + question
+        answer = self.agent.run(question)
+        print(f"Agent returning answer: {answer}")
+        return answer
 
 def run_and_submit_all( profile: gr.OAuthProfile | None):
     """
@@ -80,7 +112,7 @@ def run_and_submit_all( profile: gr.OAuthProfile | None):
             print(f"Skipping item with missing task_id or question: {item}")
             continue
         try:
-            submitted_answer = agent(question_text)
+            submitted_answer = agent(question_text, task_id)
             answers_payload.append({"task_id": task_id, "submitted_answer": submitted_answer})
             results_log.append({"Task ID": task_id, "Question": question_text, "Submitted Answer": submitted_answer})
         except Exception as e:
